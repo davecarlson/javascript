@@ -12,7 +12,7 @@ import { Tooltip } from '@/ui/elements/Tooltip';
 import { handleError } from '@/ui/utils/errorHandler';
 
 import { DevOnly } from '../../common/DevOnly';
-import { useCheckoutContext, usePaymentMethods } from '../../contexts';
+import { useCheckoutContext, useEnvironment, usePaymentMethods } from '../../contexts';
 import { Box, Button, Col, descriptors, Flex, Form, localizationKeys, Spinner, Text } from '../../customizables';
 import { ChevronUpDown, InformationCircle } from '../../icons';
 import * as AddPaymentMethod from '../PaymentMethods/AddPaymentMethod';
@@ -180,10 +180,13 @@ const useCheckoutMutations = () => {
       useTestCard: true,
     });
 
+  const subscribeWithoutPaymentMethod = () => confirmCheckout({});
+
   return {
     payWithExistingPaymentMethod,
     addPaymentMethodAndPay,
     payWithTestCard,
+    subscribeWithoutPaymentMethod,
   };
 };
 
@@ -214,12 +217,19 @@ const CheckoutFormElementsInternal = () => {
   const { checkout } = useCheckout();
   const { id, totals, isImmediatePlanChange, freeTrialEndsAt } = checkout;
   const { data: paymentMethods } = usePaymentMethods();
+  const environment = useEnvironment();
 
   const [paymentMethodSource, setPaymentMethodSource] = useState<PaymentMethodSource>(() =>
     paymentMethods.length > 0 || __BUILD_DISABLE_RHC__ ? 'existing' : 'new',
   );
 
-  const showPaymentMethods = isImmediatePlanChange && (totals.totalDueNow.amount > 0 || !!freeTrialEndsAt);
+  // Check if payment methods should be shown based on:
+  // 1. Immediate plan change (not a downgrade)
+  // 2. Either there's an amount due now OR it's a free trial that requires payment method
+  const showPaymentMethods =
+    isImmediatePlanChange &&
+    (totals.totalDueNow.amount > 0 ||
+      (!!freeTrialEndsAt && environment.commerceSettings.billing.freeTrialRequiresPaymentMethod));
 
   if (!id) {
     return null;
@@ -254,14 +264,19 @@ const CheckoutFormElementsInternal = () => {
         </>
       )}
 
-      {paymentMethodSource === 'existing' && (
+      {showPaymentMethods && paymentMethodSource === 'existing' && (
         <ExistingPaymentMethodForm
           paymentMethods={paymentMethods}
           totalDueNow={totals.totalDueNow}
         />
       )}
 
-      {__BUILD_DISABLE_RHC__ ? null : paymentMethodSource === 'new' && <AddPaymentMethodForCheckout />}
+      {__BUILD_DISABLE_RHC__
+        ? null
+        : showPaymentMethods && paymentMethodSource === 'new' && <AddPaymentMethodForCheckout />}
+
+      {/* Show standalone subscribe button when payment methods are not needed */}
+      {!showPaymentMethods && isImmediatePlanChange && <StandaloneSubscribeButton />}
     </Col>
   );
 };
@@ -374,6 +389,7 @@ const ExistingPaymentMethodForm = withCardStateProvider(
     const submitLabel = useSubmitLabel();
     const { checkout } = useCheckout();
     const { paymentMethod, isImmediatePlanChange, freeTrialEndsAt } = checkout;
+    const environment = useEnvironment();
 
     const { payWithExistingPaymentMethod } = useCheckoutMutations();
     const card = useCardState();
@@ -395,7 +411,10 @@ const ExistingPaymentMethodForm = withCardStateProvider(
       });
     }, [paymentMethods]);
 
-    const showPaymentMethods = isImmediatePlanChange && (totalDueNow.amount > 0 || !!freeTrialEndsAt);
+    const showPaymentMethods =
+      isImmediatePlanChange &&
+      (totalDueNow.amount > 0 ||
+        (!!freeTrialEndsAt && environment.commerceSettings.billing.freeTrialRequiresPaymentMethod));
 
     return (
       <Form
@@ -462,3 +481,21 @@ const ExistingPaymentMethodForm = withCardStateProvider(
     );
   },
 );
+
+const StandaloneSubscribeButton = withCardStateProvider(() => {
+  const { subscribeWithoutPaymentMethod } = useCheckoutMutations();
+  const submitLabel = useSubmitLabel();
+  const card = useCardState();
+
+  return (
+    <Button
+      elementDescriptor={descriptors.formButtonPrimary}
+      onClick={subscribeWithoutPaymentMethod}
+      sx={{
+        width: '100%',
+      }}
+      isLoading={card.isLoading}
+      localizationKey={submitLabel}
+    />
+  );
+});
