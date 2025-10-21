@@ -63,7 +63,6 @@ export const CreateOrganizationForm = withCardStateProvider((props: CreateOrgani
   const dataChanged = !!nameField.value;
   const canSubmit = dataChanged;
 
-  // Environment setting takes precedence over prop
   const organizationSlugEnabled = !organizationSettings.slug.disabled;
 
   const onSubmit = async (e: React.FormEvent) => {
